@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Custom Audio Tone Generator & Downloader</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #121212;
+            color: #e0e0e0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        .card {
+            background: #1e1e1e;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            width: 100%;
+            max-width: 400px;
+        }
+        h2 {
+            margin-top: 0;
+            color: #fff;
+            text-align: center;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        input[type="number"], select {
+            width: 100%;
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid #333;
+            background: #2a2a2a;
+            color: #fff;
+            box-sizing: border-box;
+            font-size: 16px;
+        }
+        .btn-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 25px;
+        }
+        button {
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn-play {
+            background: #00adb5;
+            color: white;
+        }
+        .btn-play:hover { background: #008c92; }
+        .btn-play.playing { background: #ff4444; }
+        .btn-download {
+            background: #28a745;
+            color: white;
+        }
+        .btn-download:hover { background: #218838; }
+        button:disabled {
+            background: #444 !important;
+            color: #888;
+            cursor: not-allowed;
+        }
+        .status {
+            text-align: center;
+            font-size: 14px;
+            color: #00adb5;
+            margin-top: 15px;
+            height: 20px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2>Tone Generator</h2>
+    
+    <div class="form-group">
+        <label for="frequency">Frequency (Hz)</label>
+        <input type="number" id="frequency" value="3000" min="20" max="20000">
+    </div>
+
+    <div class="form-group">
+        <label for="waveform">Waveform Type</label>
+        <select id="waveform">
+            <option value="sine">Sine (Pure Tone)</option>
+            <option value="square">Square</option>
+            <option value="sawtooth">Sawtooth</option>
+            <option value="triangle">Triangle</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="duration">Duration (Seconds)</label>
+        <input type="number" id="duration" value="600" min="1" max="3600">
+    </div>
+
+    <div class="btn-group">
+        <button id="playBtn" class="btn-play">Play Tone</button>
+        <button id="downloadBtn" class="btn-download">Download WAV</button>
+    </div>
+
+    <div id="status" class="status"></div>
+</div>
+
+<script>
+    let audioCtx = null;
+    let oscillator = null;
+    let stopTimeout = null;
+    let isPlaying = false;
+
+    const playBtn = document.getElementById('playBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const statusDiv = document.getElementById('status');
+
+    // Browser playback engine
+    playBtn.addEventListener('click', () => {
+        if (isPlaying) {
+            stopTone();
+            return;
+        }
+
+        const freq = parseFloat(document.getElementById('frequency').value);
+        const type = document.getElementById('waveform').value;
+        const duration = parseFloat(document.getElementById('duration').value);
+
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+
+        oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+
+        oscillator.type = type;
+        oscillator.frequency.value = freq;
+        
+        // Gentle fade-out to prevent popping
+        gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+
+        oscillator.start();
+        isPlaying = true;
+        playBtn.textContent = 'Stop';
+        playBtn.classList.add('playing');
+        statusDiv.textContent = `Playing for ${duration}s...`;
+
+        stopTimeout = setTimeout(() => {
+            stopTone();
+        }, duration * 1000);
+    });
+
+    function stopTone() {
+        if (oscillator) {
+            try { oscillator.stop(); } catch(e) {}
+            oscillator.disconnect();
+        }
+        clearTimeout(stopTimeout);
+        isPlaying = false;
+        playBtn.textContent = 'Play Tone';
+        playBtn.classList.remove('playing');
+        statusDiv.textContent = '';
+    }
+
+    // WAV File Renderer and Exporter
+    downloadBtn.addEventListener('click', async () => {
+        const freq = parseFloat(document.getElementById('frequency').value);
+        const type = document.getElementById('waveform').value;
+        const duration = parseFloat(document.getElementById('duration').value);
+        
+        downloadBtn.disabled = true;
+        statusDiv.textContent = "Generating file...";
+
+        // Use OfflineAudioContext to render the audio rapidly in the background
+        const sampleRate = 44100;
+        const numSamples = sampleRate * duration;
+        const offlineCtx = new OfflineAudioContext(1, numSamples, sampleRate);
+
+        const osc = offlineCtx.createOscillator();
+        osc.type = type;
+        osc.frequency.value = freq;
+        osc.connect(offlineCtx.destination);
+        osc.start();
+
+        const renderedBuffer = await offlineCtx.startRendering();
+        const wavBlob = bufferToWav(renderedBuffer, numSamples);
+        
+        // Trigger download
+        const url = URL.createObjectURL(wavBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${type}_${freq}Hz_${duration}s.wav`;
+        a.click();
+        
+        URL.revokeObjectURL(url);
+        downloadBtn.disabled = false;
+        statusDiv.textContent = "Download complete!";
+        setTimeout(() => statusDiv.textContent = "", 3000);
+    });
+
+    // Helper: Converts AudioBuffer array data to standard WAV file formatting
+    function bufferToWav(buffer, numSamples) {
+        const bufferLength = numSamples * 2; // 16-bit audio (2 bytes per sample)
+        const fileBuffer = new ArrayBuffer(44 + bufferLength);
+        const view = new DataView(fileBuffer);
+        const channelData = buffer.getChannelData(0);
+
+        /* RIFF identifier */
+        writeString(view, 0, 'RIFF');
+        /* file length */
+        view.setUint32(4, 36 + bufferLength, true);
+        /* RIFF type */
+        writeString(view, 8, 'WAVE');
+        /* format chunk identifier */
+        writeString(view, 12, 'fmt ');
+        /* format chunk length */
+        view.setUint32(16, 16, true);
+        /* sample format (raw PCM) */
+        view.setUint16(20, 1, true);
+        /* channel count */
+        view.setUint16(22, 1, true);
+        /* sample rate */
+        view.setUint32(24, 44100, true);
+        /* byte rate (sample rate * block align) */
+        view.setUint32(28, 44100 * 2, true);
+        /* block align (channel count * bytes per sample) */
+        view.setUint16(32, 2, true);
+        /* bits per sample */
+        view.setUint16(34, 16, true);
+        /* data chunk identifier */
+        writeString(view, 36, 'data');
+        /* chunk length */
+        view.setUint32(40, bufferLength, true);
+
+        // Write PCM audio data samples
+        let index = 44;
+        for (let i = 0; i < numSamples; i++) {
+            let sample = Math.max(-1, Math.min(1, channelData[i]));
+            // Convert float to 16-bit signed integer
+            view.setInt16(index, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+            index += 2;
+        }
+
+        return new Blob([view], { type: 'audio/wav' });
+    }
+
+    function writeString(view, offset, string) {
+        for (let i = 0; i < string.length; i++) {
+            view.setUint8(offset + i, string.charCodeAt(i));
+        }
+    }
+</script>
+
+</body>
+</html>
